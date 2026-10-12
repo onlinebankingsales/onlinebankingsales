@@ -84,7 +84,10 @@ st.markdown(
     [data-testid="stSidebar"] { background: #183b34; }
     [data-testid="stSidebar"] * { color: #eef5f1; }
     [data-testid="stSidebar"] [data-testid="stButton"] button {
-        color: #18322e; background: #f0f6f2; border: 0;
+        color: #ffffff; background: var(--coral); border: 0;
+    }
+    [data-testid="stSidebar"] [data-testid="stButton"] button:hover {
+        color: #ffffff; background: #963e33; border: 0;
     }
     [data-testid="stForm"] {
         background: #ffffff; border: 1px solid var(--line); border-radius: 9px;
