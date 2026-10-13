@@ -89,11 +89,22 @@ st.markdown(
     }
     [data-testid="stSidebar"] { background: #183b34; }
     [data-testid="stSidebar"] * { color: #eef5f1; }
+    [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"],
+    [data-testid="stSidebarCollapsedControl"] {
+        display: none !important;
+    }
     [data-testid="stSidebar"] [data-testid="stButton"] button {
         color: #ffffff; background: var(--coral); border: 0;
     }
     [data-testid="stSidebar"] [data-testid="stButton"] button:hover {
         color: #ffffff; background: #963e33; border: 0;
+    }
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary {
+        background: #ffffff; border-radius: 6px;
+    }
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary,
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary * {
+        color: #000000 !important;
     }
     [data-testid="stForm"] {
         background: #ffffff; border: 1px solid var(--line); border-radius: 9px;
@@ -151,6 +162,8 @@ st.markdown(
         text-transform: uppercase;
     }
     header [data-testid="stHeaderActionElements"],
+    header [data-testid="stToolbarActions"],
+    header [data-testid="stToolbar"],
     header [data-testid="stMainMenu"],
     header [data-testid="stAppDeployButton"],
     header button[title*="Share"],
