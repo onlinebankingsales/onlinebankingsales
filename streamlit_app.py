@@ -58,7 +58,7 @@ st.set_page_config(
     page_title="Field Operations",
     page_icon="📋",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 st.markdown(
@@ -87,24 +87,9 @@ st.markdown(
     [data-testid="stWidgetLabel"] label {
         color: var(--ink); font-size: 1rem; font-weight: 600;
     }
-    [data-testid="stSidebar"] { background: #183b34; }
-    [data-testid="stSidebar"] * { color: #eef5f1; }
-    [data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"],
+    [data-testid="stSidebar"],
     [data-testid="stSidebarCollapsedControl"] {
         display: none !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stButton"] button {
-        color: #ffffff; background: var(--coral); border: 0;
-    }
-    [data-testid="stSidebar"] [data-testid="stButton"] button:hover {
-        color: #ffffff; background: #963e33; border: 0;
-    }
-    [data-testid="stSidebar"] [data-testid="stExpander"] summary {
-        background: #ffffff; border-radius: 6px;
-    }
-    [data-testid="stSidebar"] [data-testid="stExpander"] summary,
-    [data-testid="stSidebar"] [data-testid="stExpander"] summary * {
-        color: #000000 !important;
     }
     [data-testid="stForm"] {
         background: #ffffff; border: 1px solid var(--line); border-radius: 9px;
@@ -222,32 +207,49 @@ is_super_admin = current_user["role"] == "super_admin"
 is_admin = current_user["role"] in ("admin", "super_admin")
 role_label = "Super administrator" if is_super_admin else "Administrator" if is_admin else "Employee"
 
-st.sidebar.markdown('<p class="eyebrow">FIELD OPERATIONS</p>', unsafe_allow_html=True)
-st.sidebar.markdown(f"### {current_user['employee_name']}")
-st.sidebar.caption(role_label)
-st.sidebar.button("Sign out", on_click=sign_out, width="stretch")
-with st.sidebar.expander("Change password"):
-    with st.form("change_own_password_form", clear_on_submit=True):
-        current_password = st.text_input("Current password", type="password")
-        new_own_password = st.text_input("New password", type="password")
-        confirm_own_password = st.text_input(
-            "Confirm new password", type="password"
-        )
-        change_password_submitted = st.form_submit_button(
-            "Update password", width="stretch"
-        )
-    if change_password_submitted:
-        if new_own_password != confirm_own_password:
-            st.error("The new passwords do not match.")
-        else:
-            try:
-                change_own_password(
-                    current_user["id"], current_password, new_own_password
-                )
-            except ValueError as error:
-                st.error(str(error))
-            else:
-                st.success("Your password has been changed.")
+with st.container(border=True):
+    account_identity, account_actions = st.columns([3, 2])
+    with account_identity:
+        st.markdown(f"### {current_user['employee_name']}")
+        st.caption(role_label)
+    with account_actions:
+        password_column, sign_out_column = st.columns([1.3, 1])
+        with password_column:
+            with st.expander("Change password"):
+                with st.form("change_own_password_form", clear_on_submit=True):
+                    current_password = st.text_input(
+                        "Current password", type="password"
+                    )
+                    new_own_password = st.text_input(
+                        "New password", type="password"
+                    )
+                    confirm_own_password = st.text_input(
+                        "Confirm new password", type="password"
+                    )
+                    change_password_submitted = st.form_submit_button(
+                        "Update password", width="stretch"
+                    )
+                if change_password_submitted:
+                    if new_own_password != confirm_own_password:
+                        st.error("The new passwords do not match.")
+                    else:
+                        try:
+                            change_own_password(
+                                current_user["id"],
+                                current_password,
+                                new_own_password,
+                            )
+                        except ValueError as error:
+                            st.error(str(error))
+                        else:
+                            st.success("Your password has been changed.")
+        with sign_out_column:
+            st.button(
+                "Sign out",
+                on_click=sign_out,
+                type="secondary",
+                width="stretch",
+            )
 
 if is_admin:
     managed_users = list_users(current_user["id"])
@@ -363,7 +365,7 @@ if is_admin:
         if is_super_admin:
             st.caption(
                 "Set a new password for any employee or administrator. "
-                "To change your own password, use the sidebar."
+                "To change your own password, use Change password above."
             )
         else:
             st.caption("You can reset passwords for employee accounts you created.")
