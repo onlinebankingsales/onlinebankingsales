@@ -88,6 +88,10 @@ st.markdown(
     h2 { font-size: 1.45rem; font-weight: 700; }
     h3 { font-size: 1.12rem; font-weight: 700; }
     p, label, [data-testid="stCaptionContainer"] { color: var(--muted); }
+    [data-testid="stWidgetLabel"] p,
+    [data-testid="stWidgetLabel"] label {
+        color: var(--ink); font-size: 1rem; font-weight: 600;
+    }
     [data-testid="stSidebar"] { background: #183b34; }
     [data-testid="stSidebar"] * { color: #eef5f1; }
     [data-testid="stSidebar"] [data-testid="stButton"] button {
@@ -102,14 +106,31 @@ st.markdown(
     }
     [data-testid="stTextInput"] [data-baseweb="input"],
     [data-testid="stNumberInput"] [data-baseweb="input"],
-    [data-testid="stDateInput"] [data-baseweb="input"] {
-        background: #183b34;
+    [data-testid="stDateInput"] [data-baseweb="input"],
+    [data-testid="stTextArea"] [data-baseweb="textarea"],
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div {
+        background: #ffffff; border: 1px solid #9aada6; border-radius: 6px;
     }
     [data-testid="stTextInput"] input,
     [data-testid="stNumberInput"] input,
-    [data-testid="stDateInput"] input {
-        color: #ffffff !important;
-        -webkit-text-fill-color: #ffffff;
+    [data-testid="stDateInput"] input,
+    [data-testid="stTextArea"] textarea,
+    [data-testid="stSelectbox"] [data-baseweb="select"] * {
+        color: var(--ink) !important; font-size: 1rem; font-weight: 500;
+        -webkit-text-fill-color: var(--ink);
+    }
+    [data-testid="stTextInput"] input,
+    [data-testid="stNumberInput"] input,
+    [data-testid="stDateInput"] input,
+    [data-testid="stTextArea"] textarea {
+        background: #ffffff;
+    }
+    [data-testid="stTextInput"] [data-baseweb="input"]:focus-within,
+    [data-testid="stNumberInput"] [data-baseweb="input"]:focus-within,
+    [data-testid="stDateInput"] [data-baseweb="input"]:focus-within,
+    [data-testid="stTextArea"] [data-baseweb="textarea"]:focus-within,
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
+        border-color: var(--green); box-shadow: 0 0 0 1px var(--green);
     }
     div[data-testid="stMetric"] {
         background: #ffffff; border: 1px solid var(--line); border-radius: 8px;
@@ -133,6 +154,10 @@ st.markdown(
     .eyebrow {
         color: var(--green); font-size: .75rem; font-weight: 700;
         text-transform: uppercase;
+    }
+    #MainMenu, footer, [data-testid="stStatusWidget"],
+    [data-testid="stAppDeployButton"] {
+        display: none !important;
     }
     @media (max-width: 640px) {
         [data-testid="stMainBlockContainer"] { padding: 1rem .9rem 2rem; }
