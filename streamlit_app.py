@@ -150,9 +150,14 @@ st.markdown(
         color: var(--green); font-size: .75rem; font-weight: 700;
         text-transform: uppercase;
     }
-    [data-testid="stHeaderActionElements"],
-    [data-testid="stMainMenu"],
-    [data-testid="stAppDeployButton"] {
+    header [data-testid="stHeaderActionElements"],
+    header [data-testid="stMainMenu"],
+    header [data-testid="stAppDeployButton"],
+    header button[title*="Share"],
+    header button[aria-label*="Share"],
+    header button[title*="Profile"],
+    header button[aria-label*="Profile"],
+    header button[kind="headerNoPadding"] {
         display: none !important;
     }
     @media (max-width: 640px) {
