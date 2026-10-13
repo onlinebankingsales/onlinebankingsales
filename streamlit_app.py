@@ -24,6 +24,7 @@ from data_store import (
     SUPER_ADMIN_USERNAME,
     add_record,
     authenticate,
+    change_own_password,
     create_account,
     delete_user,
     get_admin_records,
@@ -31,6 +32,7 @@ from data_store import (
     get_user_records,
     initialize_database,
     list_users,
+    reset_user_password,
 )
 
 
@@ -75,6 +77,11 @@ st.markdown(
     html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     .stApp { background: var(--canvas); color: var(--ink); }
     [data-testid="stHeader"] { background: transparent; }
+    .stAppToolbar,
+    [data-testid="stToolbar"],
+    [data-testid="stToolbarActions"] {
+        display: none !important;
+    }
     [data-testid="stMainBlockContainer"] { padding-top: 2rem; padding-bottom: 3rem; }
     h1, h2, h3 { color: var(--ink); font-family: 'Manrope', sans-serif; }
     h1 { font-size: 2rem; font-weight: 750; }
@@ -92,6 +99,17 @@ st.markdown(
     [data-testid="stForm"] {
         background: #ffffff; border: 1px solid var(--line); border-radius: 9px;
         padding: 1.1rem 1.2rem;
+    }
+    [data-testid="stTextInput"] [data-baseweb="input"],
+    [data-testid="stNumberInput"] [data-baseweb="input"],
+    [data-testid="stDateInput"] [data-baseweb="input"] {
+        background: #183b34;
+    }
+    [data-testid="stTextInput"] input,
+    [data-testid="stNumberInput"] input,
+    [data-testid="stDateInput"] input {
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff;
     }
     div[data-testid="stMetric"] {
         background: #ffffff; border: 1px solid var(--line); border-radius: 8px;
@@ -169,6 +187,28 @@ st.sidebar.markdown('<p class="eyebrow">FIELD OPERATIONS</p>', unsafe_allow_html
 st.sidebar.markdown(f"### {current_user['employee_name']}")
 st.sidebar.caption(role_label)
 st.sidebar.button("Sign out", on_click=sign_out, width="stretch")
+with st.sidebar.expander("Change password"):
+    with st.form("change_own_password_form", clear_on_submit=True):
+        current_password = st.text_input("Current password", type="password")
+        new_own_password = st.text_input("New password", type="password")
+        confirm_own_password = st.text_input(
+            "Confirm new password", type="password"
+        )
+        change_password_submitted = st.form_submit_button(
+            "Update password", width="stretch"
+        )
+    if change_password_submitted:
+        if new_own_password != confirm_own_password:
+            st.error("The new passwords do not match.")
+        else:
+            try:
+                change_own_password(
+                    current_user["id"], current_password, new_own_password
+                )
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                st.success("Your password has been changed.")
 
 if is_admin:
     managed_users = list_users(current_user["id"])
@@ -197,11 +237,12 @@ if is_admin:
         metric_columns[0].metric("Employees", employee_count)
         if is_super_admin:
             metric_columns[1].metric("Administrators", administrator_count)
-            metric_columns[2].metric("All records", len(managed_records))
+            metric_columns[2].metric("Interested customers", len(managed_records))
             metric_columns[3].metric("Total acres", f"{acreage_total:,.2f}")
         else:
-            metric_columns[1].metric("Submitted records", len(managed_records))
+            metric_columns[1].metric("Interested customers", len(managed_records))
             metric_columns[2].metric("Total acres", f"{acreage_total:,.2f}")
+        st.caption("Count is based on submitted customer entries.")
 
         st.subheader("Latest submissions")
         if managed_records:
@@ -274,6 +315,58 @@ if is_admin:
                 st.dataframe(users_df, width="stretch", hide_index=True)
             else:
                 st.info("No managed accounts yet.")
+
+        resettable_users = [
+            user for user in managed_users if user["id"] != current_user["id"]
+        ]
+        st.divider()
+        st.subheader("Set or reset an account password")
+        if is_super_admin:
+            st.caption(
+                "Set a new password for any employee or administrator. "
+                "To change your own password, use the sidebar."
+            )
+        else:
+            st.caption("You can reset passwords for employee accounts you created.")
+        if resettable_users:
+            resettable_users_by_id = {
+                user["id"]: user for user in resettable_users
+            }
+            with st.form("reset_account_password_form", clear_on_submit=True):
+                selected_reset_user_id = st.selectbox(
+                    "Account",
+                    options=list(resettable_users_by_id),
+                    format_func=lambda user_id: (
+                        f"{resettable_users_by_id[user_id]['employee_name']} · "
+                        f"{resettable_users_by_id[user_id]['username']} · "
+                        f"{resettable_users_by_id[user_id]['role'].replace('_', ' ').title()}"
+                    ),
+                )
+                new_reset_password = st.text_input(
+                    "New password", type="password"
+                )
+                confirm_reset_password = st.text_input(
+                    "Confirm new password", type="password"
+                )
+                reset_password_submitted = st.form_submit_button(
+                    "Set new password", width="stretch"
+                )
+            if reset_password_submitted:
+                if new_reset_password != confirm_reset_password:
+                    st.error("The new passwords do not match.")
+                else:
+                    try:
+                        reset_user_password(
+                            current_user["id"],
+                            selected_reset_user_id,
+                            new_reset_password,
+                        )
+                    except ValueError as error:
+                        st.error(str(error))
+                    else:
+                        st.success("The account password has been reset.")
+        else:
+            st.info("There are no other accounts in your scope.")
 
         deletable_users = [
             user for user in managed_users if user["id"] != current_user["id"]
