@@ -35,18 +35,44 @@ volume when deploying.
 - Super administrator `352247` can create administrators and employees, manage
    every account, and view or download all records.
 - Administrators can create and delete only the employees they created, and can
-   view or download only those employees' records.
+   view or download only those employees' records. They can also reset the
+   passwords of those employees.
 - Employees can view only their own records and cannot download records.
+- Every account can change its own password after confirming its current
+  password. From the Accounts tab, the super administrator can set a new
+  password for any administrator or employee; administrators can reset
+  passwords for employees they created.
+- The dashboard's Interested customers count is the total number of submitted
+  customer entries, not a count of unique contact numbers.
 - Account creation requires a username, employee name, and initial password.
 - Employee names are captured on each record from the registered account, not
    entered freely with each submission.
-- Deleting an employee account prevents future sign-ins but retains their
-   Deleting an administrator transfers their managed accounts and records to
+- Only administrators can delete accounts: administrators can delete employees
+   they created, and the super administrator can delete any account except their
+   own.
+- Deleting an employee account prevents future sign-ins but does not delete
+   their submitted records. Those records remain available to the responsible
+   administrator and the super administrator.
+- Deleting an administrator transfers their managed accounts and records to
    the super administrator.
 - Passwords are stored as salted PBKDF2 hashes, not plaintext.
+- Changing or resetting a password updates only that account's password hash;
+  it does not delete accounts or submitted records.
 
 Use HTTPS when exposing the app beyond a trusted local environment, and keep a
 protected backup of `records.db` because it contains the accounts and records.
+Before each database write, the app also saves a verified SQLite backup beside
+`DATA_DB_PATH` (or beside the app's `records.db` by default) and retains the
+latest 30 backup files. This includes portable snapshots of PostgreSQL data when
+`DATABASE_URL` is configured. Backup files contain all account and customer
+data, are created with owner-only permissions, and should be copied to durable
+storage for deployments whose local filesystem is ephemeral.
+
+To restore a SQLite backup, stop the app and copy the chosen
+`records.db.backup-*.sqlite` file over the configured database path. To restore
+a PostgreSQL backup, set `DATABASE_URL` to an empty PostgreSQL database (or one
+containing only its initial bootstrap super-administrator account), then run
+`uv run python migrate_to_postgres.py path/to/your-backup.sqlite`.
 
 ## Deploy persistently
 
