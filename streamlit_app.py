@@ -150,6 +150,8 @@ st.markdown(
         color: var(--green); font-size: .75rem; font-weight: 700;
         text-transform: uppercase;
     }
+    [data-testid="stHeaderActionElements"],
+    [data-testid="stMainMenu"],
     [data-testid="stAppDeployButton"] {
         display: none !important;
     }
