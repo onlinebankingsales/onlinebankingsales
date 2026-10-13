@@ -77,11 +77,6 @@ st.markdown(
     html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     .stApp { background: var(--canvas); color: var(--ink); }
     [data-testid="stHeader"] { background: transparent; }
-    .stAppToolbar,
-    [data-testid="stToolbar"],
-    [data-testid="stToolbarActions"] {
-        display: none !important;
-    }
     [data-testid="stMainBlockContainer"] { padding-top: 2rem; padding-bottom: 3rem; }
     h1, h2, h3 { color: var(--ink); font-family: 'Manrope', sans-serif; }
     h1 { font-size: 2rem; font-weight: 750; }
@@ -155,7 +150,6 @@ st.markdown(
         color: var(--green); font-size: .75rem; font-weight: 700;
         text-transform: uppercase;
     }
-    #MainMenu, footer, [data-testid="stStatusWidget"],
     [data-testid="stAppDeployButton"] {
         display: none !important;
     }
