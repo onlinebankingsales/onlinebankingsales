@@ -1,3 +1,4 @@
+
 # Field Data Capture
 
 Streamlit portal for field employees to enter customer data and view only their
@@ -44,6 +45,9 @@ volume when deploying.
   passwords for employees they created.
 - The dashboard's Interested customers count is the total number of submitted
   customer entries, not a count of unique contact numbers.
+- Each customer entry records whether the customer is Interested or Not
+  interested in the Remarks field. Existing entries without a saved remark are
+  displayed as Not specified.
 - Account creation requires a username, employee name, and initial password.
 - Employee names are captured on each record from the registered account, not
    entered freely with each submission.
