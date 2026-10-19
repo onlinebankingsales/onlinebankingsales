@@ -58,6 +58,13 @@ def sign_out():
     st.session_state.pop("login_error", None)
 
 
+def render_copyright_footer():
+    st.markdown(
+        '<p class="copyright-footer">Copyrights @jeevanreddynimmala</p>',
+        unsafe_allow_html=True,
+    )
+
+
 st.set_page_config(
     page_title="Field Operations",
     page_icon="📋",
@@ -143,6 +150,10 @@ st.markdown(
         border-radius: 50%; background: var(--green);
     }
     .login-form-caption { margin: -.5rem 0 1rem; }
+    .copyright-footer {
+        margin: 2rem 0 0; color: var(--muted); font-size: .78rem;
+        font-weight: 500;
+    }
     .workspace-intro { margin: -.4rem 0 1rem; }
     [data-testid="stWidgetLabel"] p,
     [data-testid="stWidgetLabel"] label {
@@ -329,6 +340,7 @@ if current_user is None:
             st.form_submit_button("Sign in", on_click=sign_in, width="stretch")
         if error := st.session_state.get("login_error"):
             st.error(error)
+    render_copyright_footer()
     st.stop()
 
 is_super_admin = current_user["role"] == "super_admin"
@@ -417,11 +429,45 @@ if is_admin:
             )
         st.caption("Count is based on submitted customer entries.")
 
-        st.subheader("Latest submissions")
-        if managed_records:
-            st.dataframe(records_df.head(8), width="stretch", hide_index=True)
+        st.subheader("Employee submission summary")
+        st.caption("All-time totals and entries submitted today (India Standard Time).")
+        today = datetime.now(INDIA_TIMEZONE).date().isoformat()
+        employee_totals = {}
+        for record in managed_records:
+            employee_name = record["Employee Name"]
+            totals = employee_totals.setdefault(
+                employee_name,
+                {"Total entries": 0, "Interested customers": 0, "Entries today": 0},
+            )
+            totals["Total entries"] += 1
+            totals["Interested customers"] += record["Remarks"] == "Interested"
+            totals["Entries today"] += record["Entry Date"] == today
+
+        employee_names = {
+            user["employee_name"]
+            for user in managed_users
+            if user["role"] == "user"
+        } | employee_totals.keys()
+        employee_summary = [
+            {
+                "Employee name": employee_name,
+                **employee_totals.get(
+                    employee_name,
+                    {
+                        "Total entries": 0,
+                        "Interested customers": 0,
+                        "Entries today": 0,
+                    },
+                ),
+            }
+            for employee_name in sorted(employee_names, key=str.casefold)
+        ]
+        if employee_summary:
+            st.dataframe(
+                pd.DataFrame(employee_summary), width="stretch", hide_index=True
+            )
         else:
-            st.info("No records have been submitted to this account yet.")
+            st.info("No employee accounts or submissions are available in this scope.")
 
     with accounts_tab:
         create_column, accounts_column = st.columns([0.85, 1.15], gap="large")
@@ -694,3 +740,5 @@ else:
             )
         else:
             st.info("Your saved entries will appear here.")
+
+render_copyright_footer()
