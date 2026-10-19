@@ -373,7 +373,6 @@ if is_admin:
     employee_count = sum(user["role"] == "user" for user in managed_users)
     administrator_count = sum(user["role"] == "admin" for user in managed_users)
     records_df = pd.DataFrame(managed_records)
-    acreage_total = records_df["Acres"].sum() if not records_df.empty else 0
 
     st.markdown(
         '<p class="eyebrow">ADMINISTRATION</p>', unsafe_allow_html=True
@@ -390,15 +389,13 @@ if is_admin:
         ["Overview", "Accounts", "Records"]
     )
     with overview_tab:
-        metric_columns = st.columns(4 if is_super_admin else 3)
+        metric_columns = st.columns(3 if is_super_admin else 2)
         metric_columns[0].metric("Employees", employee_count)
         if is_super_admin:
             metric_columns[1].metric("Administrators", administrator_count)
             metric_columns[2].metric("Interested customers", len(managed_records))
-            metric_columns[3].metric("Total acres", f"{acreage_total:,.2f}")
         else:
             metric_columns[1].metric("Interested customers", len(managed_records))
-            metric_columns[2].metric("Total acres", f"{acreage_total:,.2f}")
         st.caption("Count is based on submitted customer entries.")
 
         st.subheader("Latest submissions")
