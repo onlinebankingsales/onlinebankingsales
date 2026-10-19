@@ -18,6 +18,7 @@ SUPER_ADMIN_USERNAME = "352247"
 PASSWORD_ITERATIONS = 600_000
 USERNAME_PATTERN = re.compile(r"[A-Za-z0-9_.-]{3,32}\Z")
 DUMMY_SALT = b"streamlit-field-app-login-salt"
+REMARK_OPTIONS = ("Interested", "Not interested")
 
 
 @contextmanager
@@ -152,8 +153,8 @@ def _backup_postgres_database(temporary_path):
                 INSERT INTO records (
                     id, user_id, admin_owner_id, employee_name, entry_date,
                     logged_time, customer_name, contact_number, acres, village,
-                    mandal, district
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    mandal, district, remarks
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -169,6 +170,7 @@ def _backup_postgres_database(temporary_path):
                         record["village"],
                         record["mandal"],
                         record["district"],
+                        record.get("remarks", "Not specified"),
                     )
                     for record in records
                 ],
@@ -235,7 +237,7 @@ def _initialization_needs_backup():
             }
             if not {"role", "created_by_user_id"} <= user_columns:
                 return True
-            if "admin_owner_id" not in record_columns:
+            if not {"admin_owner_id", "remarks"} <= record_columns:
                 return True
 
             super_admin = connection.execute(
@@ -285,7 +287,7 @@ def _initialization_needs_backup():
         }
         if not {"role", "created_by_user_id"} <= user_columns:
             return True
-        if "admin_owner_id" not in record_columns:
+        if not {"admin_owner_id", "remarks"} <= record_columns:
             return True
 
         super_admin = connection.execute(
@@ -387,7 +389,8 @@ def _initialize_sqlite_schema(connection):
             acres REAL NOT NULL CHECK (acres >= 0),
             village TEXT NOT NULL,
             mandal TEXT NOT NULL,
-            district TEXT NOT NULL
+            district TEXT NOT NULL,
+            remarks TEXT NOT NULL DEFAULT 'Not specified'
         );
         CREATE INDEX IF NOT EXISTS records_user_date_idx
             ON records(user_id, entry_date, id);
@@ -409,6 +412,11 @@ def _initialize_sqlite_schema(connection):
         connection.execute(
             """ALTER TABLE records ADD COLUMN admin_owner_id
                INTEGER REFERENCES users(id) ON DELETE SET NULL"""
+        )
+    if "remarks" not in record_columns:
+        connection.execute(
+            """ALTER TABLE records ADD COLUMN remarks
+               TEXT NOT NULL DEFAULT 'Not specified'"""
         )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS users_creator_idx ON users(created_by_user_id)"
@@ -448,7 +456,8 @@ def _initialize_postgres_schema(connection):
             acres DOUBLE PRECISION NOT NULL CHECK (acres >= 0),
             village TEXT NOT NULL,
             mandal TEXT NOT NULL,
-            district TEXT NOT NULL
+            district TEXT NOT NULL,
+            remarks TEXT NOT NULL DEFAULT 'Not specified'
         )
         """
     )
@@ -459,6 +468,10 @@ def _initialize_postgres_schema(connection):
     connection.execute(
         """ALTER TABLE records ADD COLUMN IF NOT EXISTS admin_owner_id
            BIGINT REFERENCES users(id) ON DELETE SET NULL"""
+    )
+    connection.execute(
+        """ALTER TABLE records ADD COLUMN IF NOT EXISTS remarks
+           TEXT NOT NULL DEFAULT 'Not specified'"""
     )
     connection.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx "
@@ -759,7 +772,10 @@ def add_record(
     village,
     mandal,
     district,
+    remarks,
 ):
+    if remarks not in REMARK_OPTIONS:
+        raise ValueError("Choose whether the customer is interested.")
     with _connection(write=True) as connection:
         user = connection.execute(
             """SELECT employee_name, created_by_user_id
@@ -772,8 +788,9 @@ def add_record(
             """
             INSERT INTO records (
                 user_id, admin_owner_id, employee_name, entry_date, logged_time,
-                customer_name, contact_number, acres, village, mandal, district
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                customer_name, contact_number, acres, village, mandal, district,
+                remarks
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -787,6 +804,7 @@ def add_record(
                 village,
                 mandal,
                 district,
+                remarks,
             ),
         )
 
@@ -800,7 +818,8 @@ RECORD_COLUMNS = """
     acres AS "Acres",
     village AS "Village",
     mandal AS "Mandal",
-    district AS "District"
+    district AS "District",
+    remarks AS "Remarks"
 """
 
 
@@ -930,8 +949,8 @@ def migrate_sqlite_to_postgres(source_path=None):
                 INSERT INTO records (
                     id, user_id, admin_owner_id, employee_name, entry_date,
                     logged_time, customer_name, contact_number, acres, village,
-                    mandal, district
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    mandal, district, remarks
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["id"],
@@ -946,6 +965,7 @@ def migrate_sqlite_to_postgres(source_path=None):
                     record["village"],
                     record["mandal"],
                     record["district"],
+                    record["remarks"] if "remarks" in record_columns else "Not specified",
                 ),
             )
 
