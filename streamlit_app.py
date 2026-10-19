@@ -172,6 +172,17 @@ st.markdown(
         color: var(--ink) !important; font-size: 1rem; font-weight: 500;
         -webkit-text-fill-color: var(--ink);
     }
+    [class*="st-key-customer_remarks"] [data-baseweb="select"] > div {
+        background: #ffffff; border: 1px solid #9aada6; border-radius: 6px;
+    }
+    [class*="st-key-customer_remarks"] [data-baseweb="select"] * {
+        color: var(--ink) !important; font-family: 'DM Sans', sans-serif;
+        font-size: 1rem; font-weight: 500;
+        -webkit-text-fill-color: var(--ink);
+    }
+    [class*="st-key-customer_remarks"] [data-baseweb="select"] > div:focus-within {
+        border-color: var(--green); box-shadow: 0 0 0 1px var(--green);
+    }
     [data-testid="stTextInput"] input,
     [data-testid="stNumberInput"] input,
     [data-testid="stDateInput"] input,
@@ -630,6 +641,7 @@ else:
             remarks = st.selectbox(
                 "Remarks *",
                 options=["Select a remark...", *REMARK_OPTIONS],
+                key="customer_remarks",
             )
             submitted = st.form_submit_button("Save entry", width="stretch")
 
