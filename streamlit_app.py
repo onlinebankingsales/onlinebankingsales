@@ -1,6 +1,7 @@
 import os
-from datetime import date, datetime
+from datetime import datetime
 from io import BytesIO
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -35,6 +36,8 @@ from data_store import (
     reset_user_password,
 )
 
+INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
+
 
 def sign_in():
     user = authenticate(
@@ -66,23 +69,80 @@ st.markdown(
     <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
     :root {
-        --ink: #18322e;
-        --muted: #637570;
+        --ink: #19342e;
+        --muted: #667a73;
         --green: #176c59;
         --green-dark: #124c40;
-        --line: #dce6e1;
-        --canvas: #f4f7f5;
-        --coral: #bd5142;
+        --line: #d8e3dd;
+        --canvas: #f1f5f2;
+        --coral: #b85a46;
+        --surface: #ffffff;
     }
     html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
-    .stApp { background: var(--canvas); color: var(--ink); }
+    .stApp {
+        background: linear-gradient(135deg, #f4f7f4 0%, #edf3ef 100%);
+        color: var(--ink);
+    }
     [data-testid="stHeader"] { background: transparent; }
-    [data-testid="stMainBlockContainer"] { padding-top: 2rem; padding-bottom: 3rem; }
+    [data-testid="stMainBlockContainer"] {
+        max-width: 1480px; padding: 1.35rem 2.5rem 3rem;
+    }
     h1, h2, h3 { color: var(--ink); font-family: 'Manrope', sans-serif; }
-    h1 { font-size: 2rem; font-weight: 750; }
+    h1 { font-size: 2rem; font-weight: 750; line-height: 1.18; }
     h2 { font-size: 1.45rem; font-weight: 700; }
     h3 { font-size: 1.12rem; font-weight: 700; }
     p, label, [data-testid="stCaptionContainer"] { color: var(--muted); }
+    .app-masthead {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 1rem; padding: .85rem 0 1.25rem; margin-bottom: 1.2rem;
+        border-bottom: 1px solid var(--line);
+    }
+    .brand-lockup { display: flex; align-items: center; gap: .8rem; }
+    .brand-glyph {
+        display: grid; place-items: center; width: 2.65rem; height: 2.65rem;
+        border-radius: 7px; background: var(--green); color: white;
+        font: 800 .82rem 'Manrope', sans-serif;
+    }
+    .brand-name {
+        display: block; color: var(--ink); font: 800 .9rem 'Manrope', sans-serif;
+    }
+    .brand-description { display: block; margin-top: .1rem; color: var(--muted); font-size: .78rem; }
+    .masthead-meta {
+        display: flex; align-items: center; gap: .5rem; color: var(--muted);
+        font-size: .75rem; font-weight: 700;
+    }
+    .status-dot { width: .48rem; height: .48rem; border-radius: 50%; background: #4c9b73; }
+    .eyebrow {
+        margin-bottom: .45rem; color: var(--green); font-size: .72rem;
+        font-weight: 700; text-transform: uppercase;
+    }
+    .login-hero {
+        display: flex; flex-direction: column; justify-content: center;
+        min-height: 22rem; padding: 2.5rem;
+        background: linear-gradient(145deg, #ffffff 0%, #edf5f0 100%);
+        border: 1px solid var(--line); border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(25, 52, 46, .045);
+    }
+    .login-hero h1 {
+        margin: .15rem 0 .9rem; color: var(--ink);
+        font-size: clamp(2.15rem, 4vw, 3.2rem); line-height: 1.08;
+        letter-spacing: -.045em;
+    }
+    .login-description {
+        max-width: 32rem; margin: 0; color: var(--muted);
+        font-size: 1.05rem; line-height: 1.65;
+    }
+    .login-benefits {
+        display: grid; gap: .75rem; margin-top: 2rem;
+        color: var(--ink); font-size: .9rem; font-weight: 600;
+    }
+    .login-benefits span { display: flex; align-items: center; gap: .7rem; }
+    .login-benefits span::before {
+        content: ""; width: .45rem; height: .45rem; flex: 0 0 .45rem;
+        border-radius: 50%; background: var(--green);
+    }
+    .login-form-caption { margin: -.5rem 0 1rem; }
+    .workspace-intro { margin: -.4rem 0 1rem; }
     [data-testid="stWidgetLabel"] p,
     [data-testid="stWidgetLabel"] label {
         color: var(--ink); font-size: 1rem; font-weight: 600;
@@ -92,8 +152,9 @@ st.markdown(
         display: none !important;
     }
     [data-testid="stForm"] {
-        background: #ffffff; border: 1px solid var(--line); border-radius: 9px;
-        padding: 1.1rem 1.2rem;
+        background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+        padding: 1.25rem 1.35rem;
+        box-shadow: 0 8px 24px rgba(25, 52, 46, .045);
     }
     [data-testid="stTextInput"] [data-baseweb="input"],
     [data-testid="stNumberInput"] [data-baseweb="input"],
@@ -124,8 +185,8 @@ st.markdown(
         border-color: var(--green); box-shadow: 0 0 0 1px var(--green);
     }
     div[data-testid="stMetric"] {
-        background: #ffffff; border: 1px solid var(--line); border-radius: 8px;
-        padding: 1rem 1.1rem;
+        background: var(--surface); border: 1px solid var(--line); border-radius: 7px;
+        padding: 1.05rem 1.15rem; box-shadow: 0 4px 14px rgba(25, 52, 46, .035);
     }
     div[data-testid="stMetricLabel"] { color: var(--muted); }
     div[data-testid="stMetricValue"] { color: var(--ink); font-family: 'Manrope', sans-serif; }
@@ -137,14 +198,27 @@ st.markdown(
     div[data-testid="stFormSubmitButton"] button[kind="primary"] {
         background: var(--green); border-color: var(--green); color: white;
     }
+    div.stButton > button[kind="primary"]:hover,
+    div[data-testid="stFormSubmitButton"] button[kind="primary"]:hover {
+        background: var(--green-dark); border-color: var(--green-dark); color: white;
+    }
     div.stButton > button:hover, div[data-testid="stFormSubmitButton"] button:hover {
         border-color: var(--green-dark); color: var(--green-dark);
     }
-    [data-testid="stTabs"] [role="tab"] { font-weight: 650; }
-    [data-testid="stDataFrame"] { border: 1px solid var(--line); border-radius: 7px; }
-    .eyebrow {
-        color: var(--green); font-size: .75rem; font-weight: 700;
-        text-transform: uppercase;
+    [data-testid="stTabs"] [role="tablist"] {
+        gap: .35rem; border-bottom: 1px solid var(--line);
+    }
+    [data-testid="stTabs"] [role="tab"] {
+        min-height: 2.8rem; color: var(--muted); font-weight: 650;
+    }
+    [data-testid="stTabs"] [role="tab"][aria-selected="true"] { color: var(--green); }
+    [data-testid="stDataFrame"] {
+        overflow: hidden; border: 1px solid var(--line); border-radius: 7px;
+        background: var(--surface);
+    }
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        border-color: var(--line) !important; border-radius: 8px !important;
+        background: rgba(255, 255, 255, .78);
     }
     header [data-testid="stHeaderActionElements"],
     header [data-testid="stToolbarActions"],
@@ -159,9 +233,16 @@ st.markdown(
         display: none !important;
     }
     @media (max-width: 640px) {
-        [data-testid="stMainBlockContainer"] { padding: 1rem .9rem 2rem; }
+        [data-testid="stMainBlockContainer"] { padding: .8rem 1rem 2rem; }
+        .app-masthead { padding: .55rem 0 1rem; margin-bottom: .8rem; }
+        .brand-description { display: none; }
+        .masthead-meta { font-size: .65rem; }
         h1 { font-size: 1.65rem; }
+        .login-hero { min-height: 0; padding: 1.5rem; }
+        .login-hero h1 { font-size: 2.25rem; }
+        .login-benefits { gap: .55rem; margin-top: 1.35rem; }
         [data-testid="stMetric"] { padding: .75rem; }
+        [data-testid="stForm"] { padding: 1rem; }
     }
     </style>
     """,
@@ -187,14 +268,49 @@ if not initialize_database():
 current_user_id = st.session_state.get("authenticated_user_id")
 current_user = get_user(current_user_id) if current_user_id else None
 
+st.markdown(
+        """
+        <div class="app-masthead">
+            <div class="brand-lockup">
+                <span class="brand-glyph">FO</span>
+                <span>
+                    <span class="brand-name">FIELD OPERATIONS</span>
+                    <span class="brand-description">Customer acquisition workspace</span>
+                </span>
+            </div>
+            <div class="masthead-meta"><span class="status-dot"></span> INDIA / IST</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+)
+
 if current_user is None:
     login_copy, login_form = st.columns([1.15, 0.85], gap="large")
     with login_copy:
-        st.markdown('<p class="eyebrow">FIELD OPERATIONS</p>', unsafe_allow_html=True)
-        st.title("Field data, in good hands.")
-        st.caption("A secure workspace for daily field records.")
+        st.markdown(
+            """
+            <section class="login-hero">
+                <p class="eyebrow">FIELD OPERATIONS</p>
+                <h1>Field data,<br>in good hands.</h1>
+                <p class="login-description">
+                    A secure workspace for capturing customer interest and
+                    keeping field teams aligned.
+                </p>
+                <div class="login-benefits">
+                    <span>Structured customer records</span>
+                    <span>Role-based team access</span>
+                    <span>Clear operational oversight</span>
+                </div>
+            </section>
+            """,
+            unsafe_allow_html=True,
+        )
     with login_form:
         st.markdown("### Sign in")
+        st.markdown(
+            '<p class="login-form-caption">Use your assigned account to continue.</p>',
+            unsafe_allow_html=True,
+        )
         with st.form("login_form"):
             st.text_input("Username", key="login_username")
             st.text_input("Password", type="password", key="login_password")
@@ -456,7 +572,9 @@ if is_admin:
             st.download_button(
                 "Download Excel",
                 data=download_buffer.getvalue(),
-                file_name=f"{file_prefix}_{date.today().isoformat()}.xlsx",
+                file_name=(
+                    f"{file_prefix}_{datetime.now(INDIA_TIMEZONE).date().isoformat()}.xlsx"
+                ),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 width="content",
             )
@@ -466,13 +584,23 @@ if is_admin:
 else:
     st.markdown('<p class="eyebrow">EMPLOYEE WORKSPACE</p>', unsafe_allow_html=True)
     st.title(f"Welcome, {current_user['employee_name']}")
+    st.markdown(
+        '<p class="workspace-intro">Capture customer interest and review your saved field entries.</p>',
+        unsafe_allow_html=True,
+    )
 
     entry_tab, records_tab = st.tabs(["New entry", "My records"])
     with entry_tab:
+        st.subheader("Capture a customer entry")
+        st.caption("Fields marked with * are required.")
         with st.form("data_entry_form", clear_on_submit=True):
             date_column, name_column = st.columns(2)
             with date_column:
-                st.date_input("Entry date", value=date.today(), disabled=True)
+                st.date_input(
+                    "Entry date",
+                    value=datetime.now(INDIA_TIMEZONE).date(),
+                    disabled=True,
+                )
             with name_column:
                 st.text_input(
                     "Employee name",
@@ -515,10 +643,11 @@ else:
                 st.error("Complete all required fields before saving.")
             else:
                 try:
+                    entry_timestamp = datetime.now(INDIA_TIMEZONE)
                     add_record(
                         current_user["id"],
-                        date.today().isoformat(),
-                        datetime.now().strftime("%H:%M:%S"),
+                        entry_timestamp.date().isoformat(),
+                        entry_timestamp.strftime("%H:%M:%S"),
                         customer_name.strip(),
                         contact_number.strip(),
                         acres,
