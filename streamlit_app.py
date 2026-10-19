@@ -22,6 +22,7 @@ except StreamlitSecretNotFoundError:
 
 from data_store import (
     DATABASE_URL,
+    REMARK_OPTIONS,
     SUPER_ADMIN_USERNAME,
     add_record,
     authenticate,
@@ -626,6 +627,10 @@ else:
                 mandal = st.text_input("Mandal *")
             with district_column:
                 district = st.text_input("District *")
+            remarks = st.selectbox(
+                "Remarks *",
+                options=["Select a remark...", *REMARK_OPTIONS],
+            )
             submitted = st.form_submit_button("Save entry", width="stretch")
 
         if submitted:
@@ -636,7 +641,11 @@ else:
                 mandal,
                 district,
             )
-            if not all(value.strip() for value in values) or acres is None:
+            if (
+                not all(value.strip() for value in values)
+                or acres is None
+                or remarks not in REMARK_OPTIONS
+            ):
                 st.error("Complete all required fields before saving.")
             else:
                 try:
@@ -651,6 +660,7 @@ else:
                         village.strip(),
                         mandal.strip(),
                         district.strip(),
+                        remarks,
                     )
                 except ValueError as error:
                     st.error(str(error))
