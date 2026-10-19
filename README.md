@@ -43,8 +43,9 @@ volume when deploying.
   password. From the Accounts tab, the super administrator can set a new
   password for any administrator or employee; administrators can reset
   passwords for employees they created.
-- The dashboard's Interested customers count is the total number of submitted
-  customer entries, not a count of unique contact numbers.
+- The dashboard's Interested customers count includes only entries marked
+  Interested. The employee submission summary shows all-time entries,
+  interested entries, and entries submitted today for each employee.
 - Each customer entry records whether the customer is Interested or Not
   interested in the Remarks field. Existing entries without a saved remark are
   displayed as Not specified.
