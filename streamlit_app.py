@@ -384,6 +384,9 @@ if is_admin:
     managed_records = get_admin_records(current_user["id"])
     employee_count = sum(user["role"] == "user" for user in managed_users)
     administrator_count = sum(user["role"] == "admin" for user in managed_users)
+    interested_customer_count = sum(
+        record["Remarks"] == "Interested" for record in managed_records
+    )
     records_df = pd.DataFrame(managed_records)
 
     st.markdown(
@@ -405,9 +408,13 @@ if is_admin:
         metric_columns[0].metric("Employees", employee_count)
         if is_super_admin:
             metric_columns[1].metric("Administrators", administrator_count)
-            metric_columns[2].metric("Interested customers", len(managed_records))
+            metric_columns[2].metric(
+                "Interested customers", interested_customer_count
+            )
         else:
-            metric_columns[1].metric("Interested customers", len(managed_records))
+            metric_columns[1].metric(
+                "Interested customers", interested_customer_count
+            )
         st.caption("Count is based on submitted customer entries.")
 
         st.subheader("Latest submissions")
