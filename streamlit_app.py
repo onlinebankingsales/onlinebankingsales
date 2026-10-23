@@ -1,7 +1,6 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -37,7 +36,7 @@ from data_store import (
     reset_user_password,
 )
 
-INDIA_TIMEZONE = ZoneInfo("Asia/Kolkata")
+APP_TIMEZONE = timezone(timedelta(hours=5, minutes=30), name="UTC+05:30")
 
 
 def sign_in():
@@ -273,11 +272,14 @@ st.markdown(
 )
 
 if (
-    os.environ.get("REQUIRE_DATABASE_URL", "").casefold() == "true"
+    os.environ.get("REQUIRE_DATABASE_URL", "true").casefold() == "true"
     and not DATABASE_URL
 ):
     st.title("Database configuration required")
-    st.error("Set DATABASE_URL in the app secrets before starting the hosted app.")
+    st.error(
+        "Set DATABASE_URL to a persistent PostgreSQL database. "
+        "For local-only development, set REQUIRE_DATABASE_URL=false."
+    )
     st.stop()
 
 if not initialize_database():
@@ -301,7 +303,7 @@ st.markdown(
                     <span class="brand-description">Customer acquisition workspace</span>
                 </span>
             </div>
-            <div class="masthead-meta"><span class="status-dot"></span> INDIA / IST</div>
+            <div class="masthead-meta"><span class="status-dot"></span> UTC+05:30</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -430,18 +432,18 @@ if is_admin:
         st.caption("Count is based on submitted customer entries.")
 
         st.subheader("Employee submission summary")
-        st.caption("All-time totals and entries submitted today (India Standard Time).")
-        today = datetime.now(INDIA_TIMEZONE).date().isoformat()
+        st.caption("All-time totals and entries submitted yesterday (India Standard Time).")
+        yesterday = (datetime.now(APP_TIMEZONE) - timedelta(days=1)).date().isoformat()
         employee_totals = {}
         for record in managed_records:
             employee_name = record["Employee Name"]
             totals = employee_totals.setdefault(
                 employee_name,
-                {"Total entries": 0, "Interested customers": 0, "Entries today": 0},
+                {"Total entries": 0, "Interested entries": 0, "Entries yesterday": 0},
             )
             totals["Total entries"] += 1
-            totals["Interested customers"] += record["Remarks"] == "Interested"
-            totals["Entries today"] += record["Entry Date"] == today
+            totals["Interested entries"] += record["Remarks"] == "Interested"
+            totals["Entries yesterday"] += record["Entry Date"] == yesterday
 
         employee_names = {
             user["employee_name"]
@@ -455,8 +457,8 @@ if is_admin:
                     employee_name,
                     {
                         "Total entries": 0,
-                        "Interested customers": 0,
-                        "Entries today": 0,
+                        "Interested entries": 0,
+                        "Entries yesterday": 0,
                     },
                 ),
             }
@@ -635,7 +637,7 @@ if is_admin:
                 "Download Excel",
                 data=download_buffer.getvalue(),
                 file_name=(
-                    f"{file_prefix}_{datetime.now(INDIA_TIMEZONE).date().isoformat()}.xlsx"
+                    f"{file_prefix}_{datetime.now(APP_TIMEZONE).date().isoformat()}.xlsx"
                 ),
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 width="content",
@@ -660,7 +662,7 @@ else:
             with date_column:
                 st.date_input(
                     "Entry date",
-                    value=datetime.now(INDIA_TIMEZONE).date(),
+                    value=datetime.now(APP_TIMEZONE).date(),
                     disabled=True,
                 )
             with name_column:
@@ -714,7 +716,7 @@ else:
                 st.error("Complete all required fields before saving.")
             else:
                 try:
-                    entry_timestamp = datetime.now(INDIA_TIMEZONE)
+                    entry_timestamp = datetime.now(APP_TIMEZONE)
                     add_record(
                         current_user["id"],
                         entry_timestamp.date().isoformat(),
