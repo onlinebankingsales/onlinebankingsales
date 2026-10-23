@@ -4,27 +4,22 @@ import os
 import re
 import secrets
 import sqlite3
-import tempfile
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from contextlib import closing, contextmanager
+from datetime import datetime
 from pathlib import Path
 
 DATABASE_PATH = Path(
     os.environ.get("DATA_DB_PATH", Path(__file__).with_name("records.db"))
 ).expanduser()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-BACKUP_LIMIT = 30
 SUPER_ADMIN_USERNAME = "352247"
 PASSWORD_ITERATIONS = 600_000
 USERNAME_PATTERN = re.compile(r"[A-Za-z0-9_.-]{3,32}\Z")
 DUMMY_SALT = b"streamlit-field-app-login-salt"
-REMARK_OPTIONS = ("Interested", "Not interested")
 
 
 @contextmanager
-def _connection(write=False):
-    if write:
-        _create_backup()
+def _connection():
     if DATABASE_URL:
         import psycopg
         from psycopg.rows import dict_row
@@ -45,272 +40,6 @@ def _connection(write=False):
         raise
     finally:
         raw_connection.close()
-
-
-def _new_backup_paths():
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    backup_path = DATABASE_PATH.with_name(
-        f"{DATABASE_PATH.name}.backup-{timestamp}-{secrets.token_hex(4)}.sqlite"
-    )
-    file_descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{DATABASE_PATH.name}.backup-",
-        suffix=".tmp",
-        dir=DATABASE_PATH.parent,
-    )
-    os.close(file_descriptor)
-    os.chmod(temporary_name, 0o600)
-    return backup_path, Path(temporary_name)
-
-
-def _database_has_tables(connection):
-    tables = {
-        row["name"]
-        for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    }
-    return "users" in tables or "records" in tables
-
-
-def _backup_sqlite_database(temporary_path):
-    if not DATABASE_PATH.is_file():
-        return False
-
-    source = sqlite3.connect(
-        f"file:{DATABASE_PATH.resolve()}?mode=ro", uri=True, timeout=30
-    )
-    target = sqlite3.connect(temporary_path)
-    try:
-        source.row_factory = sqlite3.Row
-        if not _database_has_tables(source):
-            return False
-        source.backup(target)
-        integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
-        if integrity != "ok":
-            raise RuntimeError(f"SQLite backup integrity check failed: {integrity}")
-    finally:
-        target.close()
-        source.close()
-    return True
-
-
-def _backup_postgres_database(temporary_path):
-    import psycopg
-    from psycopg.rows import dict_row
-
-    with psycopg.connect(DATABASE_URL, row_factory=dict_row) as source:
-        source.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        users_exist = source.execute(
-            "SELECT to_regclass('users') AS table_name"
-        ).fetchone()["table_name"]
-        records_exist = source.execute(
-            "SELECT to_regclass('records') AS table_name"
-        ).fetchone()["table_name"]
-        if not users_exist and not records_exist:
-            return False
-
-        users = source.execute("SELECT * FROM users ORDER BY id").fetchall() if users_exist else []
-        records = (
-            source.execute("SELECT * FROM records ORDER BY id").fetchall()
-            if records_exist
-            else []
-        )
-
-        super_admin_id = next(
-            (
-                user["id"]
-                for user in users
-                if user["username"].casefold() == SUPER_ADMIN_USERNAME.casefold()
-            ),
-            None,
-        )
-        with sqlite3.connect(temporary_path) as target:
-            target.row_factory = sqlite3.Row
-            _initialize_sqlite_schema(target)
-            target.executemany(
-                """
-                INSERT INTO users (
-                    id, username, employee_name, password_salt, password_hash,
-                    role, created_at, created_by_user_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        user["id"],
-                        user["username"],
-                        user["employee_name"],
-                        user["password_salt"],
-                        user["password_hash"],
-                        user["role"],
-                        user["created_at"],
-                        user.get("created_by_user_id"),
-                    )
-                    for user in users
-                ],
-            )
-            target.executemany(
-                """
-                INSERT INTO records (
-                    id, user_id, admin_owner_id, employee_name, entry_date,
-                    logged_time, customer_name, contact_number, acres, village,
-                    mandal, district, remarks
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        record["id"],
-                        record.get("user_id"),
-                        record.get("admin_owner_id", super_admin_id),
-                        record["employee_name"],
-                        record["entry_date"],
-                        record["logged_time"],
-                        record["customer_name"],
-                        record["contact_number"],
-                        record["acres"],
-                        record["village"],
-                        record["mandal"],
-                        record["district"],
-                        record.get("remarks", "Not specified"),
-                    )
-                    for record in records
-                ],
-            )
-            integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
-            if integrity != "ok":
-                raise RuntimeError(
-                    f"PostgreSQL backup integrity check failed: {integrity}"
-                )
-    return True
-
-
-def _prune_backups():
-    backups = sorted(
-        DATABASE_PATH.parent.glob(f"{DATABASE_PATH.name}.backup-*.sqlite"),
-        key=lambda path: path.name,
-        reverse=True,
-    )
-    for old_backup in backups[BACKUP_LIMIT:]:
-        old_backup.unlink()
-
-
-def _create_backup():
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    backup_path, temporary_path = _new_backup_paths()
-    try:
-        backed_up = (
-            _backup_postgres_database(temporary_path)
-            if DATABASE_URL
-            else _backup_sqlite_database(temporary_path)
-        )
-        if backed_up:
-            os.replace(temporary_path, backup_path)
-            _prune_backups()
-    finally:
-        if temporary_path.exists():
-            temporary_path.unlink()
-
-
-def _initialization_needs_backup():
-    if DATABASE_URL:
-        import psycopg
-        from psycopg.rows import dict_row
-
-        with psycopg.connect(DATABASE_URL, row_factory=dict_row) as connection:
-            users_exist = connection.execute(
-                "SELECT to_regclass('users') AS table_name"
-            ).fetchone()["table_name"]
-            records_exist = connection.execute(
-                "SELECT to_regclass('records') AS table_name"
-            ).fetchone()["table_name"]
-            if not users_exist and not records_exist:
-                return False
-            if not users_exist or not records_exist:
-                return True
-
-            user_columns = {
-                column.name
-                for column in connection.execute("SELECT * FROM users LIMIT 0").description
-            }
-            record_columns = {
-                column.name
-                for column in connection.execute("SELECT * FROM records LIMIT 0").description
-            }
-            if not {"role", "created_by_user_id"} <= user_columns:
-                return True
-            if not {"admin_owner_id", "remarks"} <= record_columns:
-                return True
-
-            super_admin = connection.execute(
-                """SELECT id, role FROM users
-                   WHERE LOWER(username) = LOWER(?)""",
-                (SUPER_ADMIN_USERNAME,),
-            ).fetchone()
-            if not super_admin:
-                return bool(
-                    connection.execute("SELECT 1 FROM users LIMIT 1").fetchone()
-                    or connection.execute("SELECT 1 FROM records LIMIT 1").fetchone()
-                )
-            return bool(
-                super_admin["role"] != "admin"
-                or connection.execute(
-                    """SELECT 1 FROM users
-                       WHERE id != ? AND created_by_user_id IS NULL LIMIT 1""",
-                    (super_admin["id"],),
-                ).fetchone()
-                or connection.execute(
-                    "SELECT 1 FROM records WHERE admin_owner_id IS NULL LIMIT 1"
-                ).fetchone()
-            )
-
-    if not DATABASE_PATH.is_file():
-        return False
-    with sqlite3.connect(
-        f"file:{DATABASE_PATH.resolve()}?mode=ro", uri=True, timeout=30
-    ) as connection:
-        connection.row_factory = sqlite3.Row
-        tables = {
-            row["name"]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
-        }
-        if not tables.intersection({"users", "records"}):
-            return False
-        if not {"users", "records"} <= tables:
-            return True
-
-        user_columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(users)")
-        }
-        record_columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(records)")
-        }
-        if not {"role", "created_by_user_id"} <= user_columns:
-            return True
-        if not {"admin_owner_id", "remarks"} <= record_columns:
-            return True
-
-        super_admin = connection.execute(
-            """SELECT id, role FROM users
-               WHERE LOWER(username) = LOWER(?)""",
-            (SUPER_ADMIN_USERNAME,),
-        ).fetchone()
-        if not super_admin:
-            return bool(
-                connection.execute("SELECT 1 FROM users LIMIT 1").fetchone()
-                or connection.execute("SELECT 1 FROM records LIMIT 1").fetchone()
-            )
-        return bool(
-            super_admin["role"] != "admin"
-            or connection.execute(
-                """SELECT 1 FROM users
-                   WHERE id != ? AND created_by_user_id IS NULL LIMIT 1""",
-                (super_admin["id"],),
-            ).fetchone()
-            or connection.execute(
-                "SELECT 1 FROM records WHERE admin_owner_id IS NULL LIMIT 1"
-            ).fetchone()
-        )
 
 
 class _PostgresConnection:
@@ -389,8 +118,7 @@ def _initialize_sqlite_schema(connection):
             acres REAL NOT NULL CHECK (acres >= 0),
             village TEXT NOT NULL,
             mandal TEXT NOT NULL,
-            district TEXT NOT NULL,
-            remarks TEXT NOT NULL DEFAULT 'Not specified'
+            district TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS records_user_date_idx
             ON records(user_id, entry_date, id);
@@ -412,11 +140,6 @@ def _initialize_sqlite_schema(connection):
         connection.execute(
             """ALTER TABLE records ADD COLUMN admin_owner_id
                INTEGER REFERENCES users(id) ON DELETE SET NULL"""
-        )
-    if "remarks" not in record_columns:
-        connection.execute(
-            """ALTER TABLE records ADD COLUMN remarks
-               TEXT NOT NULL DEFAULT 'Not specified'"""
         )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS users_creator_idx ON users(created_by_user_id)"
@@ -456,8 +179,7 @@ def _initialize_postgres_schema(connection):
             acres DOUBLE PRECISION NOT NULL CHECK (acres >= 0),
             village TEXT NOT NULL,
             mandal TEXT NOT NULL,
-            district TEXT NOT NULL,
-            remarks TEXT NOT NULL DEFAULT 'Not specified'
+            district TEXT NOT NULL
         )
         """
     )
@@ -468,10 +190,6 @@ def _initialize_postgres_schema(connection):
     connection.execute(
         """ALTER TABLE records ADD COLUMN IF NOT EXISTS admin_owner_id
            BIGINT REFERENCES users(id) ON DELETE SET NULL"""
-    )
-    connection.execute(
-        """ALTER TABLE records ADD COLUMN IF NOT EXISTS remarks
-           TEXT NOT NULL DEFAULT 'Not specified'"""
     )
     connection.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx "
@@ -533,14 +251,25 @@ def _ensure_super_admin(connection):
 
 
 def initialize_database():
-    if _initialization_needs_backup():
-        _create_backup()
     with _connection() as connection:
         if DATABASE_URL:
             _initialize_postgres_schema(connection)
         else:
             _initialize_sqlite_schema(connection)
         return _ensure_super_admin(connection)
+
+
+def export_sqlite_database():
+    if DATABASE_URL:
+        raise RuntimeError("SQLite backups are only available when using SQLite.")
+    if not DATABASE_PATH.is_file():
+        raise FileNotFoundError(f"SQLite database not found: {DATABASE_PATH}")
+
+    source_uri = f"{DATABASE_PATH.resolve().as_uri()}?mode=ro"
+    with closing(sqlite3.connect(source_uri, uri=True)) as source:
+        with closing(sqlite3.connect(":memory:")) as backup:
+            source.backup(backup)
+            return backup.serialize()
 
 
 def authenticate(username, password):
@@ -561,69 +290,6 @@ def authenticate(username, password):
         public_user["role"] = _effective_role(user)
         return public_user
     return None
-
-
-def _validate_new_password(password):
-    if len(password) < 8:
-        raise ValueError("Password must be at least 8 characters.")
-
-
-def change_own_password(user_id, current_password, new_password):
-    _validate_new_password(new_password)
-    with _connection(write=True) as connection:
-        user = connection.execute(
-            "SELECT password_salt, password_hash FROM users WHERE id = ?",
-            (user_id,),
-        ).fetchone()
-        if not user:
-            raise ValueError("The account is no longer available.")
-        current_hash = _password_digest(current_password, user["password_salt"])
-        if not hmac.compare_digest(current_hash, user["password_hash"]):
-            raise ValueError("Current password is incorrect.")
-
-        salt = secrets.token_bytes(16)
-        password_hash = _password_digest(new_password, salt)
-        connection.execute(
-            "UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?",
-            (salt, password_hash, user_id),
-        )
-
-
-def reset_user_password(requester_id, target_user_id, new_password):
-    _validate_new_password(new_password)
-    with _connection(write=True) as connection:
-        requester = connection.execute(
-            "SELECT id, username, role FROM users WHERE id = ?", (requester_id,)
-        ).fetchone()
-        target = connection.execute(
-            """SELECT id, username, role, created_by_user_id
-               FROM users WHERE id = ?""",
-            (target_user_id,),
-        ).fetchone()
-        if not requester:
-            raise ValueError("The administrator account is no longer available.")
-        if not target:
-            raise ValueError("That account no longer exists.")
-
-        requester_role = _effective_role(requester)
-        if requester_role == "super_admin":
-            if target["username"].casefold() == SUPER_ADMIN_USERNAME.casefold():
-                raise ValueError(
-                    "Use the change-password form to update the super administrator password."
-                )
-        elif not (
-            requester_role == "admin"
-            and target["role"] == "user"
-            and target["created_by_user_id"] == requester_id
-        ):
-            raise ValueError("You can only reset passwords for employees you created.")
-
-        salt = secrets.token_bytes(16)
-        password_hash = _password_digest(new_password, salt)
-        connection.execute(
-            "UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?",
-            (salt, password_hash, target_user_id),
-        )
 
 
 def get_user(user_id):
@@ -653,7 +319,7 @@ def create_account(requester_id, username, employee_name, password, role="user")
     if role not in ("admin", "user"):
         raise ValueError("Choose a valid account role.")
 
-    with _connection(write=True) as connection:
+    with _connection() as connection:
         requester = connection.execute(
             "SELECT id, username, role FROM users WHERE id = ?", (requester_id,)
         ).fetchone()
@@ -722,7 +388,7 @@ def delete_user(user_id, requester_id):
     if user_id == requester_id:
         raise ValueError("You cannot delete the account currently in use.")
 
-    with _connection(write=True) as connection:
+    with _connection() as connection:
         requester = connection.execute(
             "SELECT id, username, role FROM users WHERE id = ?", (requester_id,)
         ).fetchone()
@@ -772,11 +438,8 @@ def add_record(
     village,
     mandal,
     district,
-    remarks,
 ):
-    if remarks not in REMARK_OPTIONS:
-        raise ValueError("Choose whether the customer is interested.")
-    with _connection(write=True) as connection:
+    with _connection() as connection:
         user = connection.execute(
             """SELECT employee_name, created_by_user_id
                FROM users WHERE id = ? AND role = 'user'""",
@@ -788,9 +451,8 @@ def add_record(
             """
             INSERT INTO records (
                 user_id, admin_owner_id, employee_name, entry_date, logged_time,
-                customer_name, contact_number, acres, village, mandal, district,
-                remarks
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                customer_name, contact_number, acres, village, mandal, district
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -804,7 +466,6 @@ def add_record(
                 village,
                 mandal,
                 district,
-                remarks,
             ),
         )
 
@@ -818,8 +479,7 @@ RECORD_COLUMNS = """
     acres AS "Acres",
     village AS "Village",
     mandal AS "Mandal",
-    district AS "District",
-    remarks AS "Remarks"
+    district AS "District"
 """
 
 
@@ -890,7 +550,7 @@ def migrate_sqlite_to_postgres(source_path=None):
         raise ValueError("The SQLite database has no super administrator account.")
     super_admin_id = super_admin["id"]
 
-    with _connection(write=True) as connection:
+    with _connection() as connection:
         _initialize_postgres_schema(connection)
         target_user_count = connection.execute(
             "SELECT COUNT(*) AS total FROM users"
@@ -949,8 +609,8 @@ def migrate_sqlite_to_postgres(source_path=None):
                 INSERT INTO records (
                     id, user_id, admin_owner_id, employee_name, entry_date,
                     logged_time, customer_name, contact_number, acres, village,
-                    mandal, district, remarks
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    mandal, district
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["id"],
@@ -965,7 +625,6 @@ def migrate_sqlite_to_postgres(source_path=None):
                     record["village"],
                     record["mandal"],
                     record["district"],
-                    record["remarks"] if "remarks" in record_columns else "Not specified",
                 ),
             )
 
