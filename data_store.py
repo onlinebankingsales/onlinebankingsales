@@ -5,21 +5,24 @@ import re
 import secrets
 import sqlite3
 from contextlib import closing, contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+DEFAULT_DATABASE_PATH = Path.home() / ".field_operations" / "records.db"
 DATABASE_PATH = Path(
-    os.environ.get("DATA_DB_PATH", Path(__file__).with_name("records.db"))
+    os.environ.get("DATA_DB_PATH", str(DEFAULT_DATABASE_PATH))
 ).expanduser()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 SUPER_ADMIN_USERNAME = "352247"
 PASSWORD_ITERATIONS = 600_000
 USERNAME_PATTERN = re.compile(r"[A-Za-z0-9_.-]{3,32}\Z")
 DUMMY_SALT = b"streamlit-field-app-login-salt"
+REMARK_OPTIONS = ("Interested", "Not interested")
+APP_TIMEZONE = timezone(timedelta(hours=5, minutes=30), name="UTC+05:30")
 
 
 @contextmanager
-def _connection():
+def _connection(write=False):
     if DATABASE_URL:
         import psycopg
         from psycopg.rows import dict_row
@@ -28,6 +31,8 @@ def _connection():
         connection = _PostgresConnection(raw_connection)
     else:
         DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if write:
+            _backup_sqlite_database()
         raw_connection = sqlite3.connect(DATABASE_PATH, timeout=30)
         raw_connection.row_factory = sqlite3.Row
         raw_connection.execute("PRAGMA foreign_keys = ON")
@@ -42,6 +47,103 @@ def _connection():
         raw_connection.close()
 
 
+def _sqlite_table_counts(path):
+    if not path.is_file():
+        return 0, 0
+
+    with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as db:
+        tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        user_count = (
+            db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            if "users" in tables
+            else 0
+        )
+        record_count = (
+            db.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+            if "records" in tables
+            else 0
+        )
+    return user_count, record_count
+
+
+def _migrate_legacy_sqlite_path():
+    if DATABASE_URL or os.environ.get("DATA_DB_PATH"):
+        return
+
+    legacy_path = Path(__file__).with_name("records.db")
+    marker_path = DATABASE_PATH.with_name(
+        f"{DATABASE_PATH.name}.legacy-imported"
+    )
+    if marker_path.exists():
+        return
+    if legacy_path.resolve() == DATABASE_PATH.resolve() or not legacy_path.is_file():
+        return
+
+    legacy_counts = _sqlite_table_counts(legacy_path)
+    if legacy_counts == (0, 0):
+        return
+
+    current_counts = _sqlite_table_counts(DATABASE_PATH)
+    if current_counts != (0, 0):
+        raise RuntimeError(
+            "Both the legacy and current SQLite databases contain accounts or "
+            "records. Neither was changed. Set DATA_DB_PATH to the database "
+            "containing the data you want to use, or merge the databases before "
+            "starting the app."
+        )
+
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = DATABASE_PATH.with_name(
+        f"{DATABASE_PATH.name}.migration-{secrets.token_hex(8)}"
+    )
+    try:
+        with closing(sqlite3.connect(legacy_path)) as source:
+            with closing(sqlite3.connect(temporary_path)) as destination:
+                source.backup(destination)
+                integrity = destination.execute("PRAGMA integrity_check").fetchone()[0]
+                if integrity != "ok":
+                    raise RuntimeError(
+                        f"Legacy SQLite database failed integrity check: {integrity}"
+                    )
+        os.replace(temporary_path, DATABASE_PATH)
+        marker_path.write_text(
+            str(legacy_path.resolve()),
+            encoding="utf-8",
+        )
+    except Exception:
+        if temporary_path.exists():
+            temporary_path.unlink()
+        raise
+
+
+def _backup_sqlite_database():
+    if DATABASE_URL or not DATABASE_PATH.is_file():
+        return
+
+    timestamp = datetime.now(APP_TIMEZONE).strftime("%Y%m%d-%H%M%S-%f")
+    backup_path = DATABASE_PATH.with_name(
+        f"{DATABASE_PATH.name}.backup-{timestamp}.sqlite"
+    )
+    try:
+        with closing(sqlite3.connect(DATABASE_PATH)) as source:
+            with closing(sqlite3.connect(backup_path)) as backup:
+                source.backup(backup)
+                integrity = backup.execute("PRAGMA integrity_check").fetchone()[0]
+                if integrity != "ok":
+                    raise RuntimeError(
+                        f"SQLite backup failed integrity check: {integrity}"
+                    )
+    except Exception:
+        if backup_path.exists():
+            backup_path.unlink()
+        raise
+
+
 class _PostgresConnection:
     def __init__(self, connection):
         self.connection = connection
@@ -53,6 +155,15 @@ class _PostgresConnection:
 def _password_digest(password, salt):
     return hashlib.pbkdf2_hmac(
         "sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS
+    )
+
+
+def _set_user_password(connection, user_id, new_password):
+    salt = secrets.token_bytes(16)
+    password_hash = _password_digest(new_password, salt)
+    connection.execute(
+        "UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?",
+        (salt, password_hash, user_id),
     )
 
 
@@ -86,7 +197,7 @@ def _insert_user(
             salt,
             password_hash,
             role,
-            datetime.now().isoformat(timespec="seconds"),
+            datetime.now(APP_TIMEZONE).isoformat(timespec="seconds"),
             created_by_user_id,
         ),
     )
@@ -104,7 +215,8 @@ def _initialize_sqlite_schema(connection):
             password_hash BLOB NOT NULL,
             role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
             created_at TEXT NOT NULL,
-            created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+            created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
         );
         CREATE TABLE IF NOT EXISTS records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,7 +230,9 @@ def _initialize_sqlite_schema(connection):
             acres REAL NOT NULL CHECK (acres >= 0),
             village TEXT NOT NULL,
             mandal TEXT NOT NULL,
-            district TEXT NOT NULL
+            district TEXT NOT NULL,
+            remarks TEXT NOT NULL DEFAULT 'Not interested'
+            CHECK (remarks IN ('Interested', 'Not interested'))
         );
         CREATE INDEX IF NOT EXISTS records_user_date_idx
             ON records(user_id, entry_date, id);
@@ -132,6 +246,13 @@ def _initialize_sqlite_schema(connection):
             """ALTER TABLE users ADD COLUMN created_by_user_id
                INTEGER REFERENCES users(id) ON DELETE SET NULL"""
         )
+    if "is_active" not in user_columns:
+        connection.execute(
+            "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
+        )
+        connection.execute(
+            "UPDATE users SET is_active = 1 WHERE is_active IS NULL"
+        )
 
     record_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(records)")
@@ -140,6 +261,13 @@ def _initialize_sqlite_schema(connection):
         connection.execute(
             """ALTER TABLE records ADD COLUMN admin_owner_id
                INTEGER REFERENCES users(id) ON DELETE SET NULL"""
+        )
+    if "remarks" not in record_columns:
+        connection.execute(
+            "ALTER TABLE records ADD COLUMN remarks TEXT NOT NULL DEFAULT 'Not interested'"
+        )
+        connection.execute(
+            "UPDATE records SET remarks = 'Not interested' WHERE remarks IS NULL"
         )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS users_creator_idx ON users(created_by_user_id)"
@@ -161,7 +289,8 @@ def _initialize_postgres_schema(connection):
             password_hash BYTEA NOT NULL,
             role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
             created_at TEXT NOT NULL,
-            created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL
+            created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+            is_active SMALLINT NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
         )
         """
     )
@@ -179,7 +308,8 @@ def _initialize_postgres_schema(connection):
             acres DOUBLE PRECISION NOT NULL CHECK (acres >= 0),
             village TEXT NOT NULL,
             mandal TEXT NOT NULL,
-            district TEXT NOT NULL
+            district TEXT NOT NULL,
+            remarks TEXT NOT NULL DEFAULT 'Not interested'
         )
         """
     )
@@ -188,8 +318,20 @@ def _initialize_postgres_schema(connection):
            BIGINT REFERENCES users(id) ON DELETE SET NULL"""
     )
     connection.execute(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active SMALLINT NOT NULL DEFAULT 1"
+    )
+    connection.execute(
+        "UPDATE users SET is_active = 1 WHERE is_active IS NULL"
+    )
+    connection.execute(
         """ALTER TABLE records ADD COLUMN IF NOT EXISTS admin_owner_id
            BIGINT REFERENCES users(id) ON DELETE SET NULL"""
+    )
+    connection.execute(
+        "ALTER TABLE records ADD COLUMN IF NOT EXISTS remarks TEXT NOT NULL DEFAULT 'Not interested'"
+    )
+    connection.execute(
+        "UPDATE records SET remarks = 'Not interested' WHERE remarks IS NULL"
     )
     connection.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx "
@@ -210,7 +352,7 @@ def _initialize_postgres_schema(connection):
 
 def _ensure_super_admin(connection):
     super_admin = connection.execute(
-        "SELECT id FROM users WHERE LOWER(username) = LOWER(?)",
+        "SELECT id FROM users WHERE LOWER(username) = LOWER(?) AND is_active = 1",
         (SUPER_ADMIN_USERNAME,),
     ).fetchone()
     if super_admin:
@@ -251,12 +393,63 @@ def _ensure_super_admin(connection):
 
 
 def initialize_database():
+    _migrate_legacy_sqlite_path()
     with _connection() as connection:
         if DATABASE_URL:
             _initialize_postgres_schema(connection)
         else:
             _initialize_sqlite_schema(connection)
         return _ensure_super_admin(connection)
+
+
+def change_own_password(user_id, current_password, new_password):
+    if len(new_password) < 8:
+        raise ValueError("Password must be at least 8 characters.")
+
+    with _connection(write=True) as connection:
+        user = connection.execute(
+            "SELECT id, password_salt, password_hash FROM users WHERE id = ? AND is_active = 1",
+            (user_id,),
+        ).fetchone()
+        if not user:
+            raise ValueError("The account is no longer available.")
+        current_hash = _password_digest(current_password, user["password_salt"])
+        if not hmac.compare_digest(current_hash, user["password_hash"]):
+            raise ValueError("The current password is incorrect.")
+        _set_user_password(connection, user_id, new_password)
+
+
+def reset_user_password(requester_id, target_user_id, new_password):
+    if len(new_password) < 8:
+        raise ValueError("Password must be at least 8 characters.")
+
+    with _connection(write=True) as connection:
+        requester = connection.execute(
+            "SELECT id, username, role, created_by_user_id FROM users WHERE id = ? AND is_active = 1",
+            (requester_id,),
+        ).fetchone()
+        if not requester:
+            raise ValueError("The administrator account is no longer available.")
+        target = connection.execute(
+            "SELECT id, username, role, created_by_user_id, is_active FROM users WHERE id = ?",
+            (target_user_id,),
+        ).fetchone()
+        if not target:
+            raise ValueError("That account no longer exists.")
+        if target["is_active"] == 0:
+            raise ValueError("That account is already inactive.")
+
+        requester_role = _effective_role(requester)
+        if requester_role == "super_admin":
+            if target["username"].casefold() == SUPER_ADMIN_USERNAME.casefold():
+                raise ValueError("The super administrator password cannot be reset here.")
+        elif requester_role == "admin":
+            if target["role"] != "user" or target["created_by_user_id"] != requester_id:
+                raise ValueError("You can only reset employee passwords you created.")
+        else:
+            raise ValueError("Only administrators can reset passwords.")
+
+        _set_user_password(connection, target_user_id, new_password)
 
 
 def export_sqlite_database():
@@ -276,7 +469,7 @@ def authenticate(username, password):
     normalized_username = username.strip()
     with _connection() as connection:
         user = connection.execute(
-            "SELECT * FROM users WHERE LOWER(username) = LOWER(?)",
+            "SELECT * FROM users WHERE LOWER(username) = LOWER(?) AND is_active = 1",
             (normalized_username,),
         ).fetchone()
 
@@ -295,7 +488,7 @@ def authenticate(username, password):
 def get_user(user_id):
     with _connection() as connection:
         user = connection.execute(
-            "SELECT id, username, employee_name, role FROM users WHERE id = ?",
+            "SELECT id, username, employee_name, role FROM users WHERE id = ? AND is_active = 1",
             (user_id,),
         ).fetchone()
     if not user:
@@ -319,9 +512,10 @@ def create_account(requester_id, username, employee_name, password, role="user")
     if role not in ("admin", "user"):
         raise ValueError("Choose a valid account role.")
 
-    with _connection() as connection:
+    with _connection(write=True) as connection:
         requester = connection.execute(
-            "SELECT id, username, role FROM users WHERE id = ?", (requester_id,)
+            "SELECT id, username, role FROM users WHERE id = ? AND is_active = 1",
+            (requester_id,),
         ).fetchone()
         if not requester:
             raise ValueError("The administrator account is no longer available.")
@@ -351,16 +545,17 @@ def create_account(requester_id, username, employee_name, password, role="user")
 def list_users(requester_id):
     with _connection() as connection:
         requester = connection.execute(
-            "SELECT id, username, role FROM users WHERE id = ?", (requester_id,)
+            "SELECT id, username, role FROM users WHERE id = ? AND is_active = 1",
+            (requester_id,),
         ).fetchone()
         if not requester:
             raise ValueError("The account is no longer available.")
         requester_role = _effective_role(requester)
         if requester_role == "super_admin":
-            where_clause = ""
+            where_clause = "WHERE account.is_active = 1"
             parameters = ()
         elif requester_role == "admin":
-            where_clause = "WHERE account.created_by_user_id = ? AND account.role = 'user'"
+            where_clause = "WHERE account.created_by_user_id = ? AND account.role = 'user' AND account.is_active = 1"
             parameters = (requester_id,)
         else:
             raise ValueError("Only administrators can manage accounts.")
@@ -388,18 +583,21 @@ def delete_user(user_id, requester_id):
     if user_id == requester_id:
         raise ValueError("You cannot delete the account currently in use.")
 
-    with _connection() as connection:
+    with _connection(write=True) as connection:
         requester = connection.execute(
-            "SELECT id, username, role FROM users WHERE id = ?", (requester_id,)
+            "SELECT id, username, role FROM users WHERE id = ? AND is_active = 1",
+            (requester_id,),
         ).fetchone()
         if not requester:
             raise ValueError("The administrator account is no longer available.")
         user = connection.execute(
-            "SELECT id, username, role, created_by_user_id FROM users WHERE id = ?",
+            "SELECT id, username, role, created_by_user_id, is_active FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
         if not user:
             raise ValueError("That account no longer exists.")
+        if user["is_active"] == 0:
+            raise ValueError("That account is already inactive.")
         requester_role = _effective_role(requester)
         if requester_role == "super_admin":
             if user["username"].casefold() == SUPER_ADMIN_USERNAME.casefold():
@@ -413,19 +611,22 @@ def delete_user(user_id, requester_id):
 
         if user["role"] == "admin":
             admin_count = connection.execute(
-                "SELECT COUNT(*) AS account_count FROM users WHERE role = 'admin'"
+                "SELECT COUNT(*) AS account_count FROM users WHERE role = 'admin' AND is_active = 1"
             ).fetchone()["account_count"]
             if admin_count <= 1:
                 raise ValueError("The last administrator account cannot be deleted.")
             connection.execute(
-                "UPDATE users SET created_by_user_id = ? WHERE created_by_user_id = ?",
+                "UPDATE users SET created_by_user_id = ? WHERE created_by_user_id = ? AND is_active = 1",
                 (requester_id, user_id),
             )
             connection.execute(
                 "UPDATE records SET admin_owner_id = ? WHERE admin_owner_id = ?",
                 (requester_id, user_id),
             )
-        connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        connection.execute(
+            "UPDATE users SET is_active = 0 WHERE id = ?",
+            (user_id,),
+        )
 
 
 def add_record(
@@ -438,8 +639,11 @@ def add_record(
     village,
     mandal,
     district,
+    remarks,
 ):
-    with _connection() as connection:
+    if remarks not in REMARK_OPTIONS:
+        raise ValueError("Please select a valid customer remark.")
+    with _connection(write=True) as connection:
         user = connection.execute(
             """SELECT employee_name, created_by_user_id
                FROM users WHERE id = ? AND role = 'user'""",
@@ -451,8 +655,9 @@ def add_record(
             """
             INSERT INTO records (
                 user_id, admin_owner_id, employee_name, entry_date, logged_time,
-                customer_name, contact_number, acres, village, mandal, district
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                customer_name, contact_number, acres, village, mandal, district,
+                remarks
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -466,6 +671,7 @@ def add_record(
                 village,
                 mandal,
                 district,
+                remarks,
             ),
         )
 
@@ -479,7 +685,8 @@ RECORD_COLUMNS = """
     acres AS "Acres",
     village AS "Village",
     mandal AS "Mandal",
-    district AS "District"
+    district AS "District",
+    remarks AS "Remarks"
 """
 
 
@@ -495,7 +702,8 @@ def get_user_records(user_id):
 def get_admin_records(admin_id):
     with _connection() as connection:
         admin = connection.execute(
-            "SELECT id, username, role FROM users WHERE id = ?", (admin_id,)
+            "SELECT id, username, role FROM users WHERE id = ? AND is_active = 1",
+            (admin_id,),
         ).fetchone()
         if not admin:
             raise ValueError("The administrator account is no longer available.")
@@ -583,8 +791,8 @@ def migrate_sqlite_to_postgres(source_path=None):
                 """
                 INSERT INTO users (
                     id, username, employee_name, password_salt, password_hash,
-                    role, created_at, created_by_user_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    role, created_at, created_by_user_id, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user["id"],
@@ -595,6 +803,7 @@ def migrate_sqlite_to_postgres(source_path=None):
                     "admin" if is_super_admin else user["role"],
                     user["created_at"],
                     created_by_user_id,
+                    user["is_active"] if "is_active" in user_columns else 1,
                 ),
             )
 
@@ -604,13 +813,20 @@ def migrate_sqlite_to_postgres(source_path=None):
                 if "admin_owner_id" in record_columns
                 else super_admin_id
             )
+            remark = (
+                record["remarks"]
+                if "remarks" in record_columns
+                else "Not interested"
+            )
+            if remark not in REMARK_OPTIONS:
+                remark = "Not interested"
             connection.execute(
                 """
                 INSERT INTO records (
                     id, user_id, admin_owner_id, employee_name, entry_date,
                     logged_time, customer_name, contact_number, acres, village,
-                    mandal, district
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    mandal, district, remarks
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record["id"],
@@ -625,6 +841,7 @@ def migrate_sqlite_to_postgres(source_path=None):
                     record["village"],
                     record["mandal"],
                     record["district"],
+                    remark,
                 ),
             )
 
