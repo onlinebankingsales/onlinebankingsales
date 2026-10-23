@@ -77,6 +77,7 @@ st.markdown(
     html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     .stApp { background: var(--canvas); color: var(--ink); }
     [data-testid="stHeader"] { background: transparent; }
+    [data-testid="stToolbar"], #MainMenu { display: none; }
     [data-testid="stMainBlockContainer"] { padding-top: 2rem; padding-bottom: 3rem; }
     h1, h2, h3 { color: var(--ink); font-family: 'Manrope', sans-serif; }
     h1 { font-size: 2rem; font-weight: 750; }
